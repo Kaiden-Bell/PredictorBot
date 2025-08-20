@@ -6,7 +6,7 @@ import time, re, requests
 import pandas as pd
 
 
-BASE = "https://liquidpedia.net/rocketleague"
+BASE = "https://liquidpedia.net/rocketleague/"
 PLACEHOLDER = re.compile(r'\b(winner|loser)\s+of\b|^tbd$|^[-—]$', re.I)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; RL-PredictorBot/1.0)",
@@ -83,7 +83,7 @@ def extractRoster(team_soup):
                 players = cleanPlayers(players)
                 players = [p for p in players if p.lower() not in {'eversax'}]  # sample coach filter; extend as needed
                 if len(players) >= 3:
-                    return players[:5]
+                    return players[:3]
                 if players:
                     return players
 
@@ -99,11 +99,11 @@ def extractRoster(team_soup):
         if els:
             names = cleanPlayers([e.get('title') or e.get_text(strip=True) for e in els])
             if names:
-                return names[:5]
+                return names[:3]
 
     els = team_soup.select('.mw-parser-output a[title]')
     names = cleanPlayers([e.get('title') for e in els])
-    return names[:5]
+    return names[:3]
 
 
 def roundMap(bracket):
@@ -164,8 +164,8 @@ def scrape(URL):
                 'round': rmap.get(id(m)) or "Unknown",
                 'best_of': 7,
                 'team1': t1, 'team2': t2,
-                'team1_url': (None if isPlaceholder(t1) else '/' + getTeamUrl(t1)),
-                'team2_url': (None if isPlaceholder(t2) else '/'+ getTeamUrl(t2)),
+                'team1_url': (None if isPlaceholder(t1) else getTeamUrl(t1)),
+                'team2_url': (None if isPlaceholder(t2) else getTeamUrl(t2)),
             })
 
     sess = requests.Session()
@@ -189,7 +189,7 @@ def scrape(URL):
 
 
 if __name__ == "__main__":
-    EU_URL = "https://liquipedia.net/rocketleague/Rocket_League_Championship_Series/2025/Last_Chance_Qualifier/Europe#Playoffs"
-    df = scrape(EU_URL)
+    URL = input("Enter the Tournament you wish to scrape: ")
+    df = scrape(URL)
     print(df[['section','round','team1','team2','team1_players','team2_players']].head(20))
-    df.to_csv("eu_playoffs_rosters.csv", index=False)
+    df.to_csv("playoffs-scraped.csv", index=False)
