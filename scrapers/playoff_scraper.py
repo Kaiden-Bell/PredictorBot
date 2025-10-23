@@ -6,7 +6,7 @@ import time, re, requests
 import pandas as pd
 
 
-BASE = "https://liquidpedia.net/rocketleague/"
+BASE = "https://liquipedia.net/rocketleague/"
 PLACEHOLDER = re.compile(r'\b(winner|loser)\s+of\b|^tbd$|^[-—]$', re.I)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; RL-PredictorBot/1.0)",

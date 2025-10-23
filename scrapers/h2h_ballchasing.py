@@ -12,7 +12,7 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-def _soup(url, session):
+def _soup(url, session=None):
     sess = session or requests.Session()
     r = sess.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
@@ -29,7 +29,7 @@ def buildH2H(t1, t2):
         "pfRunQueryFormName": "Head2head"
     }
 
-    return f"{LP_RL}/Special:RunQuery/Head2Head?{urlencode(params)}"
+    return f"{LP_RL}/Special:RunQuery/Head2head?{urlencode(params)}"
 
 def parseH2H(t1, t2):
     # Return a list of key terms from past series (date, event, match link, score)
@@ -48,10 +48,10 @@ def parseH2H(t1, t2):
         href = a.get("href")
         if not href:
             continue
-        ml = href if href.startwith("http") else (LP_BASE + href)
+        ml = href if href.startswith("http") else (LP_BASE + href)
         date = (tds[0].get_text(" ", strip=True) if tds else " ")[:32]
         score = tr.get_text(" ", strip=True)
-        rows.append({"date": date, "match link": ml, "score": score})
+        rows.append({"date": date, "matchLink": ml, "score": score})
     return rows
 
 BC_ID_RE = re.compile(r"(?:ballchasing\.com/(?:replay|group)/)([A-Za-z0-9-]+)")
@@ -74,7 +74,7 @@ def extractBallchasing(url, session):
 # Ballchasing API setup
 
 class Ballchasing:
-    def __init__(self, key, delay=0.35):
+    def __init__(self, key=None, delay=0.35):
         self.key = key or os.getenv("BALLCHASING_API_KEY") or ""
         if not self.key:
             raise RuntimeError("set BALLCHASING API KEY env or pass key=...")
@@ -135,7 +135,7 @@ def extractStats(detail):
                 "Shot %": shotPct,
                 "Saves": saves,
                 "Demos": demos,
-                "Replay ID": detail.get("id"),
+                "ReplayID": detail.get("id"),
                 "Date": detail.get("date")
             })
 
@@ -158,7 +158,6 @@ def aggregatePlayers(rows):
 
 
 def getH2HStats(t1, t2, r1, r2, bc: Ballchasing, limit: int=6, fallback: int=30):
-
     logs = []
     session = requests.Session()
     h2h = parseH2H(t1, t2)
@@ -192,7 +191,6 @@ def getH2HStats(t1, t2, r1, r2, bc: Ballchasing, limit: int=6, fallback: int=30)
         logs.append("No Ballchasing links on pages! Attempting name-based")
 
         cutoff = 50
-
         by_name = []
 
         for name in set((r1 or []) + (r2 or [])):

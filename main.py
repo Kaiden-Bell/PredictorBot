@@ -1,6 +1,9 @@
 import pandas as pd
 from scrapers import scrape_playoffs, getH2HStats, Ballchasing
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
 
 def main():
     url = input("Enter the Tournament you wish to scrape: ").strip()
