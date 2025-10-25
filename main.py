@@ -1,29 +1,153 @@
-import pandas as pd
-from scrapers import scrape_playoffs, getH2HStats, Ballchasing
-from dotenv import load_dotenv
+# main.py
 import os
+import time
+import argparse
+import pandas as pd
+from dotenv import load_dotenv
+from scrapers import (
+    scrape_playoffs,
+    Ballchasing,
+    getH2HStats,
+    load_player_id_map,
+    resolve_ids,
+)
+from stats import buildFeatRows
 
-load_dotenv()
+load_dotenv()  # BALLCHASING_API_KEY from .env
 
-def main():
-    url = input("Enter the Tournament you wish to scrape: ").strip()
-    df = scrape_playoffs(url)
-    print(df.head())
 
+def list_matches(df: pd.DataFrame) -> pd.DataFrame:
+    """Return only concrete matchups and print a numbered list."""
     mask = df["team1"].notna() & df["team2"].notna()
-    if not mask.any():
-        print("No concrete matchups yet."); return
-    row = df[mask].iloc[0]
+    matches = df[mask].reset_index(drop=True).copy()
+    if matches.empty:
+        print("⚠️  No concrete matchups yet.")
+        return matches
+
+    print("\n📋 Available matchups:")
+    for i, r in matches.iterrows():
+        sec = r.get("section") or ""
+        rnd = r.get("round") or ""
+        print(f"[{i}] {r['team1']}  vs  {r['team2']}   | {sec} {rnd}".rstrip())
+    print("")
+    return matches
 
 
+def choose_match_interactive(matches: pd.DataFrame) -> pd.Series | None:
+    """Prompt the user to pick a matchup index."""
+    while True:
+        sel = input("Enter a match number (or 'q' to quit): ").strip().lower()
+        if sel in {"q", "quit", "exit"}:
+            return None
+        if sel.isdigit():
+            i = int(sel)
+            if 0 <= i < len(matches):
+                return matches.iloc[i]
+        print(f"Invalid selection. Choose 0–{len(matches)-1}, or 'q' to quit.")
+
+
+def preselect_match(matches: pd.DataFrame, match_arg: str) -> pd.Series | None:
+    """Select by index or substring (team name fragment)."""
+    s = match_arg.strip()
+    # index?
+    if s.isdigit():
+        i = int(s)
+        if 0 <= i < len(matches):
+            return matches.iloc[i]
+        print(f"⚠️  --match index {i} out of range (0..{len(matches)-1}).")
+        return None
+
+    # substring search (case-insensitive in team1/team2)
+    s_low = s.lower()
+    mask = matches.apply(
+        lambda r: s_low in str(r["team1"]).lower() or s_low in str(r["team2"]).lower(),
+        axis=1,
+    )
+    found = matches[mask]
+    if found.empty:
+        print(f"⚠️  --match '{match_arg}' did not match any team names.")
+        return None
+    if len(found) > 1:
+        print(f"⚠️  --match '{match_arg}' matched multiple rows; picking the first.")
+    return found.iloc[0]
+
+
+def run_h2h(row: pd.Series, bc: Ballchasing):
     t1, t2 = row["team1"], row["team2"]
     r1, r2 = row["team1_players"], row["team2_players"]
 
-    bc = Ballchasing()  # requires BALLCHASING_API_KEY in env
+    print(f"\n🎯 H2H comparison: {t1} vs {t2}\n")
     stats, logs = getH2HStats(t1, t2, r1, r2, bc)
-    print(stats)
+    print(stats if not stats.empty else "No stats found.")
     if logs:
-        print("Notes:", "; ".join(logs[:6]))
+        print("\n📝 Logs:")
+        for l in logs[:10]:
+            print("-", l)
+
+
+def run_features(row: pd.Series, bc: Ballchasing):
+    """Build team-level features for just the chosen matchup (both sides)."""
+    idMap = load_player_id_map()
+    logs = []
+    r1, r2 = buildFeatRows(bc, row, resolve_ids, idMap, logs)
+    out = pd.DataFrame([r1, r2])
+    print(out)
+    os.makedirs("data", exist_ok=True)
+    out.to_csv("data/features_playoffs_selected.csv", index=False)
+    print("\n✅ Saved to data/features_playoffs_selected.csv\n")
+    if logs:
+        print("📝 Logs:")
+        for l in logs[:12]:
+            print("-", l)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="RL PredictorBot — scrape Liquipedia and fetch stats."
+    )
+    parser.add_argument(
+        "url",
+        help="Liquipedia tournament URL (e.g. https://liquipedia.net/rocketleague/Esports_World_Cup/2025)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["h2h", "features"],
+        default="features",
+        help="Choose 'h2h' for head-to-head comparison or 'features' for feature build (default).",
+    )
+    parser.add_argument(
+        "--match",
+        help="Preselect a match by index (e.g., 0) or team substring (e.g., 'Karmine'). If omitted, prompts interactively.",
+    )
+
+    args = parser.parse_args()
+    bc = Ballchasing()
+
+    print(f"\n🔍 Scraping Liquipedia data from: {args.url}\n")
+    df = scrape_playoffs(args.url)
+    print(df.head())
+
+    matches = list_matches(df)
+    if matches.empty:
+        return
+
+    # Preselect if provided; else, prompt.
+    if args.match:
+        row = preselect_match(matches, args.match)
+        if row is None:
+            row = choose_match_interactive(matches)
+    else:
+        row = choose_match_interactive(matches)
+
+    if row is None:
+        print("Exited.")
+        return
+
+    if args.mode == "h2h":
+        run_h2h(row, bc)
+    else:
+        run_features(row, bc)
+
 
 if __name__ == "__main__":
     main()

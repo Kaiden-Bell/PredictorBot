@@ -2,6 +2,55 @@ import os, re, time, requests, pandas as pd
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import quote_plus, urlencode
 from bs4 import BeautifulSoup
+import json, unicodedata
+from pathlib import Path
+
+
+ID_FILE = Path(__file__).resolve().parents[1] / "data" / "ids.json"
+
+_PLAYER_ID_RE = re.compile(r"^(steam|epic|xbox|ps|psn|ps4|ps5):", re.I)
+
+def _canon(s: str) -> str:
+    if not s: return ""
+    s = unicodedata.normalize("NFKC", s).replace("\u200b", "")
+    return " ".join(s.strip().split()).lower()
+
+def load_player_id_map(path: Path = ID_FILE) -> dict:
+    if not path.exists():
+        return {"aliases": {}, "players": {}}
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    aliases = { _canon(k): v for k, v in (data.get("aliases") or {}).items() }
+    players = {}
+    for k, v in (data.get("players") or {}).items():
+        key = _canon(k)
+        ids = v if isinstance(v, list) else [v]
+        clean = [pid for pid in ids if isinstance(pid, str) and _PLAYER_ID_RE.search(pid)]
+        if clean:
+            players[key] = clean
+    return {"aliases": aliases, "players": players}
+
+def resolve_ids(names, idmap) -> list[str]:
+    if not names: return []
+    aliases = idmap.get("aliases", {})
+    table   = idmap.get("players", {})
+    out = []
+    for name in names:
+        if not name: continue
+        c = _canon(name)
+        if c in aliases:
+            c = _canon(aliases[c])
+        ids = table.get(c)
+        if ids:
+            out.extend(ids)
+    seen, uniq = set(), []
+    for pid in out:
+        if pid not in seen:
+            uniq.append(pid); seen.add(pid)
+    return uniq
+
+
+
 
 LP_BASE = "https://liquipedia.net/"
 LP_RL = f"{LP_BASE}/rocketleague"
@@ -123,35 +172,30 @@ def extractStats(detail):
             stats = (pl.get("stats") or {})
             core = stats.get("core") or {}
             demo = stats.get("demo") or {}
-            goals = core.get("goals", 0)
-            shots = core.get("shots", 0)
-            saves = core.get("saves", 0)
-            demos = demo.get("inflicted", 0)
-            shotPct = (goals / shots) if shots else 0.0
             rows.append({
                 "Player": name,
-                "Goals": goals,
-                "Shots": shots,
-                "Shot %": shotPct,
-                "Saves": saves,
-                "Demos": demos,
-                "ReplayID": detail.get("id"),
+                "Goals": core.get("goals", 0),
+                "Shots": core.get("shots", 0),
+                "Shot %": (core.get("goals",0) / core.get("shots",1)) if core.get("shots") else 0.0,
+                "Saves": core.get("saves", 0),
+                "Demos": demo.get("inflicted", 0),
+                "replay_id": detail.get("id"),
                 "Date": detail.get("date")
             })
-
     return rows
+
 
 
 def aggregatePlayers(rows):
     if not rows:
-        return pd.DataFrame(columns=["Players", "Games", "Goals", "Shots", "Shot %", "Saves", "Demos"])
+        return pd.DataFrame(columns=["Player", "Games", "Goals", "Shots", "Shot %", "Saves", "Demos"])
     df = pd.DataFrame(rows)
     g = df.groupby("Player", dropna=False).agg(
-        games = ("replayID", "nunique"),
-        goals = ("Goals", "sum"),
-        shots = ("Shots", "sum"),
-        saves = ("Saves", "sum"),
-        demos = ("Demos", "sum"), 
+        Games = ("replay_id", "nunique"),
+        Goals = ("Goals", "sum"),
+        Shots = ("Shots", "sum"),
+        Saves = ("Saves", "sum"),
+        Demos = ("Demos", "sum"), 
     ).reset_index()
     g["Shot %"] = g.apply(lambda r: (r["Goals"]/r["Shots"]) if r["Shots"] else 0.0, axis=1)
     return g[["Player", "Games", "Goals", "Shots", "Shot %", "Saves", "Demos"]].sort_values(["Games", "Shot %"], ascending=[False, False])
